@@ -1,5 +1,7 @@
 import AppKit
 import ApplicationServices
+import Carbon
+import IOKit.ps
 
 @main
 final class ElCapitanReskinApp: NSObject, NSApplicationDelegate {
@@ -19,6 +21,8 @@ final class ElCapitanReskinApp: NSObject, NSApplicationDelegate {
         HotKeyService.shared.register()
 
         InvasiveSystemTweaks.applyRecommendedTweaks()
+
+        MenuBarExtraController.shared.install()
     }
 }
 
@@ -348,8 +352,13 @@ final class TopBarOverlayController {
 
 final class TopBarViewController: NSViewController {
     private let blur = NSVisualEffectView()
-    private let leftLabel = NSTextField(labelWithString: "")
-    private let rightLabel = NSTextField(labelWithString: "")
+
+    private let appleButton = NSButton(title: "", target: nil, action: nil)
+    private let appNameLabel = NSTextField(labelWithString: "")
+
+    private let rightStack = NSStackView()
+    private let batteryLabel = NSTextField(labelWithString: "")
+    private let clockLabel = NSTextField(labelWithString: "")
 
     private var timer: Timer?
 
@@ -360,20 +369,38 @@ final class TopBarViewController: NSViewController {
         blur.blendingMode = .behindWindow
         blur.state = .active
 
-        leftLabel.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-        leftLabel.textColor = NSColor(calibratedWhite: 1, alpha: 0.92)
+        appleButton.bezelStyle = .texturedRounded
+        appleButton.isBordered = false
+        appleButton.font = NSFont.systemFont(ofSize: 14, weight: .regular)
+        appleButton.contentTintColor = NSColor(calibratedWhite: 1, alpha: 0.92)
+        appleButton.target = self
+        appleButton.action = #selector(openAppleMenu)
 
-        rightLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
-        rightLabel.textColor = NSColor(calibratedWhite: 1, alpha: 0.92)
-        rightLabel.alignment = .right
+        appNameLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        appNameLabel.textColor = NSColor(calibratedWhite: 1, alpha: 0.92)
+
+        rightStack.orientation = .horizontal
+        rightStack.alignment = .centerY
+        rightStack.spacing = 10
+
+        batteryLabel.font = NSFont.systemFont(ofSize: 13, weight: .regular)
+        batteryLabel.textColor = NSColor(calibratedWhite: 1, alpha: 0.92)
+
+        clockLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        clockLabel.textColor = NSColor(calibratedWhite: 1, alpha: 0.92)
+
+        rightStack.addArrangedSubview(batteryLabel)
+        rightStack.addArrangedSubview(clockLabel)
 
         view.addSubview(blur)
-        view.addSubview(leftLabel)
-        view.addSubview(rightLabel)
+        view.addSubview(appleButton)
+        view.addSubview(appNameLabel)
+        view.addSubview(rightStack)
 
         blur.translatesAutoresizingMaskIntoConstraints = false
-        leftLabel.translatesAutoresizingMaskIntoConstraints = false
-        rightLabel.translatesAutoresizingMaskIntoConstraints = false
+        appleButton.translatesAutoresizingMaskIntoConstraints = false
+        appNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        rightStack.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
             blur.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -381,28 +408,71 @@ final class TopBarViewController: NSViewController {
             blur.topAnchor.constraint(equalTo: view.topAnchor),
             blur.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-            leftLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            leftLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            appleButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            appleButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
 
-            rightLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            rightLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+            appNameLabel.leadingAnchor.constraint(equalTo: appleButton.trailingAnchor, constant: 10),
+            appNameLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+
+            rightStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            rightStack.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.updateClock()
+            self?.updateBattery()
         }
         updateClock()
+        updateBattery()
     }
 
     func setFrontmost(app: NSRunningApplication?) {
         let name = app?.localizedName ?? ""
-        leftLabel.stringValue = name.isEmpty ? "" : "\(name)"
+        appNameLabel.stringValue = name
+    }
+
+    @objc private func openAppleMenu() {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "About ElCapitanReskin", action: #selector(showAbout), keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Toggle Overview", action: #selector(toggleOverview), keyEquivalent: "")
+        menu.addItem(withTitle: "Toggle Dock", action: #selector(toggleDock), keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "q")
+
+        NSMenu.popUpContextMenu(menu, with: NSApp.currentEvent ?? NSEvent(), for: appleButton)
+    }
+
+    @objc private func showAbout() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApplication.shared.orderFrontStandardAboutPanel(nil)
+    }
+
+    @objc private func toggleOverview() {
+        (NSApp.delegate as? ElCapitanReskinApp)?.overviewController?.toggle()
+    }
+
+    @objc private func toggleDock() {
+        (NSApp.delegate as? ElCapitanReskinApp)?.dockOverlayController?.toggleVisibility()
+    }
+
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
     }
 
     private func updateClock() {
         let df = DateFormatter()
         df.dateFormat = "EEE d MMM  h:mm a"
-        rightLabel.stringValue = df.string(from: Date())
+        clockLabel.stringValue = df.string(from: Date())
+    }
+
+    private func updateBattery() {
+        let percent = BatteryService.shared.currentBatteryPercent()
+        if let percent {
+            batteryLabel.stringValue = "\(percent)%"
+        } else {
+            batteryLabel.stringValue = ""
+        }
     }
 }
 
@@ -425,6 +495,218 @@ final class OverviewController {
         win.contentViewController = vc
         win.makeKeyAndOrderFront(nil)
         self.window = win
+    }
+}
+
+struct AppLaunchItem {
+    let url: URL
+    let title: String
+}
+
+final class ApplicationIndex {
+    static let shared = ApplicationIndex()
+
+    private var cached: [URL]?
+
+    func allApplications() -> [URL] {
+        if let cached { return cached }
+
+        // Fast-ish index from common locations. (No Spotlight dependency.)
+        let roots: [URL] = [
+            URL(fileURLWithPath: "/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true),
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
+        ]
+
+        var apps: [URL] = []
+        for root in roots {
+            let paths = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+            for url in paths where url.pathExtension == "app" {
+                apps.append(url)
+            }
+        }
+
+        let deduped = Array(Set(apps)).sorted { $0.path < $1.path }
+        cached = deduped
+        return deduped
+    }
+}
+
+final class LauncherController {
+    static let shared = LauncherController()
+
+    private var window: OverlayWindow?
+
+    func toggle() {
+        if let window {
+            window.orderOut(nil)
+            self.window = nil
+            return
+        }
+
+        guard let screen = NSScreen.main else { return }
+        let width: CGFloat = 620
+        let origin = CGPoint(x: screen.frame.midX - width / 2, y: screen.frame.midY + 160)
+        let win = OverlayWindow(frame: CGRect(origin: origin, size: CGSize(width: width, height: 160)), level: .floating)
+        win.hasShadow = true
+
+        let vc = LauncherViewController()
+        win.contentViewController = vc
+        win.makeKeyAndOrderFront(nil)
+        win.makeFirstResponder(vc.searchField)
+
+        self.window = win
+    }
+}
+
+final class LauncherViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+    let blur = NSVisualEffectView()
+    let searchField = NSSearchField()
+    let tableView = NSTableView()
+
+    private var results: [AppLaunchItem] = []
+
+    override func loadView() {
+        view = NSView()
+
+        blur.material = .hudWindow
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.wantsLayer = true
+        blur.layer?.cornerRadius = 14
+
+        searchField.placeholderString = "Search apps"
+        searchField.font = NSFont.systemFont(ofSize: 18, weight: .regular)
+        searchField.focusRingType = .none
+        searchField.delegate = self
+
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+
+        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("main"))
+        col.title = ""
+        tableView.addTableColumn(col)
+        tableView.headerView = nil
+        tableView.rowHeight = 36
+        tableView.backgroundColor = .clear
+        tableView.delegate = self
+        tableView.dataSource = self
+
+        scroll.documentView = tableView
+
+        blur.addSubview(searchField)
+        blur.addSubview(scroll)
+        view.addSubview(blur)
+
+        blur.translatesAutoresizingMaskIntoConstraints = false
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            blur.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            blur.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            blur.topAnchor.constraint(equalTo: view.topAnchor),
+            blur.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            searchField.leadingAnchor.constraint(equalTo: blur.leadingAnchor, constant: 16),
+            searchField.trailingAnchor.constraint(equalTo: blur.trailingAnchor, constant: -16),
+            searchField.topAnchor.constraint(equalTo: blur.topAnchor, constant: 10),
+
+            scroll.leadingAnchor.constraint(equalTo: blur.leadingAnchor, constant: 12),
+            scroll.trailingAnchor.constraint(equalTo: blur.trailingAnchor, constant: -12),
+            scroll.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 8),
+            scroll.bottomAnchor.constraint(equalTo: blur.bottomAnchor, constant: -10)
+        ])
+
+        updateResults(query: "")
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        updateResults(query: searchField.stringValue)
+    }
+
+    private func updateResults(query: String) {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        let apps = ApplicationIndex.shared.allApplications()
+
+        if q.isEmpty {
+            results = apps.prefix(20).map { AppLaunchItem(url: $0, title: $0.deletingPathExtension().lastPathComponent) }
+        } else {
+            results = apps
+                .map { AppLaunchItem(url: $0, title: $0.deletingPathExtension().lastPathComponent) }
+                .filter { $0.title.lowercased().contains(q) }
+                .prefix(30)
+                .map { $0 }
+        }
+
+        tableView.reloadData()
+
+        if tableView.selectedRow < 0, results.count > 0 {
+            tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        }
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        results.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let item = results[row]
+
+        let v = NSTableCellView()
+        let img = NSImageView()
+        img.image = NSWorkspace.shared.icon(forFile: item.url.path)
+        img.imageScaling = .scaleProportionallyUpOrDown
+
+        let label = NSTextField(labelWithString: item.title)
+        label.font = NSFont.systemFont(ofSize: 14, weight: .medium)
+        label.textColor = NSColor(calibratedWhite: 1, alpha: 0.92)
+
+        v.addSubview(img)
+        v.addSubview(label)
+        img.translatesAutoresizingMaskIntoConstraints = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            img.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 8),
+            img.centerYAnchor.constraint(equalTo: v.centerYAnchor),
+            img.widthAnchor.constraint(equalToConstant: 20),
+            img.heightAnchor.constraint(equalToConstant: 20),
+
+            label.leadingAnchor.constraint(equalTo: img.trailingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: v.centerYAnchor)
+        ])
+
+        return v
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        // no-op; we activate on Return
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { // Esc
+            view.window?.orderOut(nil)
+            return
+        }
+
+        if event.keyCode == 36 { // Return
+            let row = tableView.selectedRow
+            if row >= 0, row < results.count {
+                let item = results[row]
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = true
+                NSWorkspace.shared.openApplication(at: item.url, configuration: config)
+                view.window?.orderOut(nil)
+            }
+            return
+        }
+
+        super.keyDown(with: event)
     }
 }
 
@@ -576,27 +858,113 @@ final class OverviewWindowButton: NSView {
     }
 }
 
+final class BatteryService {
+    static let shared = BatteryService()
+
+    func currentBatteryPercent() -> Int? {
+        guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return nil }
+        guard let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
+
+        for ps in sources {
+            guard let description = IOPSGetPowerSourceDescription(snapshot, ps)?.takeUnretainedValue() as? [String: Any] else { continue }
+            guard let current = description[kIOPSCurrentCapacityKey] as? Int,
+                  let max = description[kIOPSMaxCapacityKey] as? Int,
+                  max > 0 else { continue }
+            return Int((Double(current) / Double(max)) * 100.0)
+        }
+
+        return nil
+    }
+}
+
+final class MenuBarExtraController {
+    static let shared = MenuBarExtraController()
+
+    private var statusItem: NSStatusItem?
+
+    func install() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.title = "⌘"
+
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Toggle Dock", action: #selector(toggleDock), keyEquivalent: "")
+        menu.addItem(withTitle: "Toggle Overview", action: #selector(toggleOverview), keyEquivalent: "")
+        menu.addItem(withTitle: "Toggle Launcher", action: #selector(toggleLauncher), keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Quit", action: #selector(quit), keyEquivalent: "q")
+
+        item.menu = menu
+        statusItem = item
+    }
+
+    @objc private func toggleDock() {
+        (NSApp.delegate as? ElCapitanReskinApp)?.dockOverlayController?.toggleVisibility()
+    }
+
+    @objc private func toggleOverview() {
+        (NSApp.delegate as? ElCapitanReskinApp)?.overviewController?.toggle()
+    }
+
+    @objc private func toggleLauncher() {
+        LauncherController.shared.toggle()
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+}
+
 final class HotKeyService {
     static let shared = HotKeyService()
 
+    private var hotKeyHandler: Any?
+    private var hotKeys: [UInt32: EventHotKeyRef?] = [:]
+
+    private enum HotKeyID: UInt32 {
+        case overview = 1
+        case toggleDock = 2
+        case launcher = 3
+    }
+
     func register() {
-        // Note: NSEvent global monitors only receive events while the app is running.
-        // For a true always-on hotkey, implement Carbon HotKeys or an event tap.
-        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            // Cmd+Option+E toggles overview
-            if event.modifierFlags.contains([.command, .option]), event.charactersIgnoringModifiers?.lowercased() == "e" {
-                DispatchQueue.main.async {
-                    (NSApp.delegate as? ElCapitanReskinApp)?.overviewController?.toggle()
+        registerCarbonHotKeys()
+    }
+
+    private func registerCarbonHotKeys() {
+        var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+
+        hotKeyHandler = InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+            var hkCom = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &hkCom)
+            let id = hkCom.id
+
+            DispatchQueue.main.async {
+                guard let appDelegate = NSApp.delegate as? ElCapitanReskinApp else { return }
+                switch id {
+                case HotKeyID.overview.rawValue:
+                    appDelegate.overviewController?.toggle()
+                case HotKeyID.toggleDock.rawValue:
+                    appDelegate.dockOverlayController?.toggleVisibility()
+                case HotKeyID.launcher.rawValue:
+                    LauncherController.shared.toggle()
+                default:
+                    break
                 }
             }
 
-            // Cmd+Option+D toggles our Dock overlay visibility
-            if event.modifierFlags.contains([.command, .option]), event.charactersIgnoringModifiers?.lowercased() == "d" {
-                DispatchQueue.main.async {
-                    (NSApp.delegate as? ElCapitanReskinApp)?.dockOverlayController?.toggleVisibility()
-                }
-            }
-        }
+            return noErr
+        }, 1, &eventSpec, nil, nil)
+
+        registerHotKey(id: .overview, keyCode: UInt32(kVK_ANSI_E), modifiers: UInt32(cmdKey | optionKey))
+        registerHotKey(id: .toggleDock, keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey | optionKey))
+        registerHotKey(id: .launcher, keyCode: UInt32(kVK_Space), modifiers: UInt32(cmdKey | optionKey))
+    }
+
+    private func registerHotKey(id: HotKeyID, keyCode: UInt32, modifiers: UInt32) {
+        var hotKeyID = EventHotKeyID(signature: OSType(0x454C4350), id: id.rawValue) // 'ELCP'
+        var ref: EventHotKeyRef?
+        RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &ref)
+        hotKeys[id.rawValue] = ref
     }
 }
 
@@ -605,10 +973,11 @@ enum InvasiveSystemTweaks {
         // These are invasive. They will be best-effort and may fail depending on permissions/system policies.
         hideDock()
         reduceDockDelay()
+        showScrollBarsAlways()
+        enableReduceTransparency(false)
     }
 
     private static func hideDock() {
-        // Auto-hide Dock and remove show/hide animation delay.
         run("defaults", "write", "com.apple.dock", "autohide", "-bool", "true")
         run("killall", "Dock")
     }
@@ -617,6 +986,14 @@ enum InvasiveSystemTweaks {
         run("defaults", "write", "com.apple.dock", "autohide-delay", "-float", "0")
         run("defaults", "write", "com.apple.dock", "autohide-time-modifier", "-float", "0.2")
         run("killall", "Dock")
+    }
+
+    private static func showScrollBarsAlways() {
+        run("defaults", "write", "NSGlobalDomain", "AppleShowScrollBars", "-string", "Always")
+    }
+
+    private static func enableReduceTransparency(_ enabled: Bool) {
+        run("defaults", "write", "com.apple.universalaccess", "reduceTransparency", "-bool", enabled ? "true" : "false")
     }
 
     private static func run(_ launchPath: String, _ args: String...) {

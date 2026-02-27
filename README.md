@@ -35,7 +35,9 @@ open ElCapitanReskin.xcodeproj
 
 ## Hotkeys
 
-- Cmd+Option+E: toggle overview overlay (basic placeholder UI for now)
+- Cmd+Option+E: toggle overview overlay
+- Cmd+Option+D: toggle dock overlay
+- Cmd+Option+Space: toggle launcher
 
 ## Notes
 
